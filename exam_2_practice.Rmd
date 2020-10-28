@@ -1,0 +1,122 @@
+---
+title: 'Practice Exam #2'
+author: "Buddy Scott"
+date: "10/28/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(tidyverse)
+library(rstanarm)
+library(fivethirtyeight)
+library(rsample)
+```
+
+```{r q1}
+q1 <- US_births_2000_2014 %>%
+  group_by(month, year) %>%
+  summarize(mean_births = mean(births), .groups = "drop") %>%
+  filter(year >= 2003)
+
+q1 %>%
+  ggplot(aes(x = month, y = mean_births)) + 
+  geom_line() + 
+  facet_wrap(~ year) + 
+  labs(title = "Number of US Births by Month", x = "Month", 
+       y = "Mean # of Births") + 
+  theme_minimal() + 
+  scale_x_continuous(breaks = c(1, 6, 12), 
+                     labels = c("Jan.", "June", "Dec.")) + 
+  theme(panel.spacing = unit(0.8, "lines"))
+
+  
+```
+Highest births always in the late summer / early fall months, while the lowest 
+number of births are in the winter (December and January).
+
+```{r q2}
+random_sample <- tibble(sample_n(US_births_2000_2014, 500))
+nonrandom_sample <- US_births_2000_2014 %>%
+  filter(month == 9)
+
+average1 <- US_births_2000_2014 %>%
+  summarize(mean_births = mean(births), .groups = "drop")
+
+average2 <- random_sample %>%
+  summarize(mean_births = mean(births), .groups = "drop")
+
+average3 <- nonrandom_sample %>%
+  summarize(mean_births = mean(births), .groups = "drop")
+```
+Estimate for overall births and for the random sample are fairly close to each 
+other, but estimate for births in September is way higher, corresponding to 
+what the graphs showed in question 1 about September being the highest month
+in terms of babies being born.
+
+```{r q3}
+bootstrap_estimate <- function(x) {
+x %>%
+  bootstraps(times = 1000) %>%
+  mutate(boot = map(splits, ~ analysis(.))) %>%
+  mutate(births2 = map(boot, ~pull(., births))) %>%
+  mutate(avg_births = map_dbl(births2, ~mean(.)))
+}
+
+boot_random <- random_sample %>%
+  bootstrap_estimate(.)
+
+boot_nonrandom <- random_sample %>%
+  bootstrap_estimate(.)
+
+boot_ci_rand <- boot_random %>%
+  pull(avg_births) %>%
+  quantile(probs = c(0.025, 0.975))
+
+boot_ci_nonrand <- boot_nonrandom %>%
+  pull(avg_births) %>%
+  quantile(probs = c(0.025, 0.975))
+```
+The random confidence interval seems to contain the true value. The CI is 
+[11078, 11489] and we found that average to be 11283.04. However, the nonrandom
+CI is [11064, 11481] and we found that average to be 11999.09 earlier.
+
+```{r q4}
+boot_random <- boot_random %>%
+  mutate(sample_type = "Random")
+
+boot_nonrandom <- boot_nonrandom %>%
+  mutate(sample_type = "Non-random")
+
+q4 <- bind_rows(boot_random, boot_nonrandom, .id = "sample_type")
+
+q4 %>%
+    ggplot(aes(x = avg_births, fill = sample_type)) + 
+    geom_density() + 
+    geom_vline(xintercept = mean(US_births_2000_2014$births), 
+               col = "blue", lty = "dotted") + 
+    annotate(geom = "text", 
+             x = 11600, 
+             y = 0.003, 
+             label = "True Answer", 
+             col = "blue") +
+    theme_classic() + 
+    scale_fill_manual(name = "Sample Type",
+                      values = c("coral", "pink"),
+                      breaks = c("1", "2"),
+                      labels = c("Random", "Non-random")) + 
+    labs(title = "Bootstrap Distributions from Two Samples",
+         subtitle = "Estimating Avg. # of US Births Per Day",
+         x = "Avg. births / day", y = "Density")
+```
+
+```{r q5}
+fit_random <- stan_glm(data = random_sample, births ~ 1, family = gaussian(), 
+                      refresh = 0)
+rand_ci <- posterior_interval(fit_random, prob = 0.95)
+
+fit_nonrandom <- stan_glm(data = nonrandom_sample, births ~ 1, 
+                            family = gaussian(), refresh = 0)
+nonrand_ci <- posterior_interval(fit_nonrandom, prob = 0.95)
+```
+
